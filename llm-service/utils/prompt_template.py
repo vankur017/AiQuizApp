@@ -6,7 +6,7 @@ Based on the following content, generate a 10-question multiple-choice quiz in J
 
 Instructions:
 - Include a "topic" field
-- Include 10 "questions"
+- Include 50 "questions"
 - Each question should have "question", "options", and "answer"
 
 Content:
