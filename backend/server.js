@@ -25,14 +25,14 @@ async function getQuizFromLLM(inputType, data) {
     });
 
     const json = await res.json();
-    console.log("📌 Raw LLM Response:", json);
+    console.log("📌 Raw LLM Response from FastAPI:", JSON.stringify(json, null, 2));
 
     // Case 1: LLM returns { quiz: { questions: [...] } }
     if (json.quiz?.questions?.length) {
       return json.quiz.questions;
     }
 
-    // Case 2: LLM returns a raw array
+    // Case 2: Raw array
     if (Array.isArray(json) && json.length) {
       return json;
     }
@@ -45,13 +45,15 @@ async function getQuizFromLLM(inputType, data) {
 }
 
 
+
 // --- Admin Route: Create Quiz and Room ---
 app.post("/admin/create-quiz", async (req, res) => {
-  const { inputType, data } = req.body;
-  console.log("📌 Incoming Create Quiz Request:", req.body);
+
+  
+  console.log("📌 Incoming Create Quiz Request:", req.body.inputType, req.body.data);
 
   try {
-    const questions = await getQuizFromLLM(inputType, data);
+    const questions = await getQuizFromLLM(req.body.inputType,  req.body.data);
     console.log("📌 LLM returned questions:", questions);
 
     if (!questions.length) {

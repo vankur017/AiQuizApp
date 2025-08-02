@@ -1,12 +1,8 @@
 import json
 import re
 from typing import List
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.runnables import RunnableSequence
 import requests
-
 
 LM_STUDIO_URL = "http://localhost:1234/v1/chat/completions"
 MODEL_NAME = "mistral"
@@ -15,6 +11,7 @@ def call_llm(prompt: str) -> str:
     payload = {
         "model": MODEL_NAME,
         "messages": [
+            {"role": "system", "content": "You are a quiz generator. Always return valid JSON."},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.7,
@@ -22,6 +19,7 @@ def call_llm(prompt: str) -> str:
     }
     try:
         res = requests.post(LM_STUDIO_URL, json=payload)
+        res.raise_for_status()
         return res.json()["choices"][0]["message"]["content"]
     except Exception as e:
         print("LLM Error:", e)
@@ -33,38 +31,54 @@ def strip_code_block(text: str) -> str:
 
 def parse_json_response(text: str):
     try:
-        return json.loads(strip_code_block(text))
-    except Exception:
+        cleaned = strip_code_block(text)
+
+        # Extract just the first JSON array from the response
+        match = re.search(r"\[\s*{.*}\s*\]", cleaned, re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+
+        return json.loads(cleaned)
+    except Exception as e:
+        print("Parse Error:", e)
         return []
 
-def summarize_chunk(text: str) -> str:
-    prompt = f"Summarize the following course section:\n\n{text}"
-    return call_llm(prompt)
 
 def quiz_from_chunk(text: str) -> List[dict]:
     prompt = f"""
-Generate 50 multiple-choice quiz questions from the following course section:
+    Generate 5 multiple-choice quiz questions from the following content:
 
-{text}
+    {text}
 
-Return the result in JSON format:
-[
-  {{
-    "question": "...",
-    "options": ["A", "B", "C", "D"],
-    "answer": "..."
-  }},
-  ...
-]
-    """.strip()
+    Rules:
+    - Return ONLY valid JSON (no explanations, no markdown).
+    - The "answer" must exactly match one of the options.
+    - Do not include any text outside the JSON.
 
+    Output format:
+    [
+      {{
+        "question": "What is ...?",
+        "options": ["Option A", "Option B", "Option C", "Option D"],
+        "answer": "Option A"
+      }}
+    ]
+    """
     raw = call_llm(prompt)
-    print("\n=== LLM RAW RESPONSE ===\n", raw)
+    print("\n=== RAW LLM RESPONSE ===\n", raw)
 
-    return parse_json_response(raw)
+    parsed = parse_json_response(raw)
+    if isinstance(parsed, list) and parsed:
+        return parsed
+
+    # ✅ Fallback if parsing fails
+    return [{
+        "question": "Fallback: What is AWS?",
+        "options": ["A cloud provider", "A car company", "A database", "A phone brand"],
+        "answer": "A cloud provider"
+    }]
 
 def generate_quiz_from_large_text(full_text: str) -> dict:
-    # 1. Split long text
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=100
@@ -73,10 +87,17 @@ def generate_quiz_from_large_text(full_text: str) -> dict:
 
     all_questions = []
 
-    # 2. Process each chunk
     for chunk in chunks:
         questions = quiz_from_chunk(chunk)
         all_questions.extend(questions)
+
+    # ✅ Guarantee non-empty questions
+    if not all_questions:
+        all_questions = [{
+            "question": "Fallback: What does AWS stand for?",
+            "options": ["Amazon Web Services", "Advanced Web System", "All World Servers", "Apple Wireless Setup"],
+            "answer": "Amazon Web Services"
+        }]
 
     return {
         "topic": "AI-Generated Quiz",
