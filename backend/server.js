@@ -2,7 +2,7 @@ const express = require("express");
 const { createServer } = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
-const fetch = require("node-fetch"); // ✅ clean require for CommonJS
+const fetch = require("node-fetch");
 const { v4: uuidv4 } = require("uuid");
 
 const app = express();
@@ -27,16 +27,8 @@ async function getQuizFromLLM(inputType, data) {
     const json = await res.json();
     console.log("📌 Raw LLM Response from FastAPI:", JSON.stringify(json, null, 2));
 
-    // Case 1: LLM returns { quiz: { questions: [...] } }
-    if (json.quiz?.questions?.length) {
-      return json.quiz.questions;
-    }
-
-    // Case 2: Raw array
-    if (Array.isArray(json) && json.length) {
-      return json;
-    }
-
+    if (json.quiz?.questions?.length) return json.quiz.questions;
+    if (Array.isArray(json) && json.length) return json;
     return [];
   } catch (error) {
     console.error("❌ Error fetching quiz from LLM:", error);
@@ -44,16 +36,12 @@ async function getQuizFromLLM(inputType, data) {
   }
 }
 
-
-
 // --- Admin Route: Create Quiz and Room ---
 app.post("/admin/create-quiz", async (req, res) => {
-
-  
   console.log("📌 Incoming Create Quiz Request:", req.body.inputType, req.body.data);
 
   try {
-    const questions = await getQuizFromLLM(req.body.inputType,  req.body.data);
+    const questions = await getQuizFromLLM(req.body.inputType, req.body.data);
     console.log("📌 LLM returned questions:", questions);
 
     if (!questions.length) {
@@ -81,11 +69,34 @@ app.post("/admin/create-quiz", async (req, res) => {
       currentQuestion: null,
     };
 
+    // ✅ Automatically send first question after creation
+    setTimeout(() => {
+      sendNextQuestion(io, quizId);
+    }, 1000);
+
     return res.json({ quizId });
   } catch (err) {
     console.error("❌ Admin Create Quiz Error:", err);
     return res.status(500).json({ error: err.message });
   }
+});
+
+// --- New Route: Fetch quiz state ---
+app.get("/quiz/:quizId", (req, res) => {
+  const { quizId } = req.params;
+  const room = rooms[quizId];
+
+  if (!room) {
+    return res.status(404).json({ error: "Quiz not found" });
+  }
+
+  res.json({
+    quizId,
+    currentQuestionIndex: room.currentQuestionIndex,
+    currentQuestion: room.currentQuestion,
+    leaderboard: Object.values(room.users),
+    totalQuestions: room.questions.length,
+  });
 });
 
 // --- Socket.IO Quiz Flow ---
@@ -106,10 +117,14 @@ io.on("connection", (socket) => {
   });
 
   socket.on("start_quiz", ({ quizId }) => {
-    if (!rooms[quizId]) {
+    const room = rooms[quizId];
+    if (!room) {
       socket.emit("error", "Invalid quiz ID");
       return;
     }
+
+    room.currentQuestionIndex = 0;
+    room.currentQuestion = null;
     sendNextQuestion(io, quizId);
   });
 
@@ -135,6 +150,13 @@ io.on("connection", (socket) => {
       }
     }
   });
+
+  socket.on("next_question", ({ quizId }) => {
+    const room = rooms[quizId];
+    if (!room) return;
+    room.currentQuestionIndex++;
+    sendNextQuestion(io, quizId);
+  });
 });
 
 // --- Helper: Send Next Question ---
@@ -151,18 +173,6 @@ function sendNextQuestion(io, quizId) {
 
   io.to(quizId).emit("new_question", q);
 }
-
-// Add a new socket event to trigger manually
-io.on("connection", (socket) => {
-  socket.on("next_question", ({ quizId }) => {
-    const room = rooms[quizId];
-    if (!room) return;
-    room.currentQuestionIndex++;
-    sendNextQuestion(io, quizId);
-  });
-});
-
-
 
 const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => console.log(`Backend running on ${PORT}`));

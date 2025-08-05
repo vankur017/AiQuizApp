@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import { socket } from "../utils/socket";
 import QuestionCard from "../components/QuestionCard";
 
@@ -12,18 +12,43 @@ interface Question {
 
 const QuizRoom: React.FC = () => {
   const { quizId } = useParams<{ quizId: string }>();
+  console.log(quizId);
+  
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const username = queryParams.get("username") || "Player-" + Date.now();
+
   const [question, setQuestion] = useState<Question | null>(null);
   const [answered, setAnswered] = useState(false);
   const [leaderboard, setLeaderboard] = useState<{ username: string; score: number }[]>([]);
   const [quizEnded, setQuizEnded] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
+  // ✅ Fetch initial state from server
+  const fetchQuizState = async () => {
+    if (!quizId) return;
+    try {
+      const res = await fetch(`http://localhost:5000/quiz/${quizId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (data.currentQuestion) {
+        setQuestion(data.currentQuestion);
+      }
+      if (data.leaderboard) {
+        setLeaderboard(data.leaderboard);
+      }
+    } catch (err) {
+      console.error("❌ Error fetching quiz state:", err);
+    }
+  };
+
   useEffect(() => {
+    if (!quizId) return;
+
     socket.connect();
 
-    const username = "Player-" + Date.now();
-
-    // First joiner for this quizId becomes admin
+    // First joiner becomes admin
     if (!sessionStorage.getItem(`admin-${quizId}`)) {
       setIsAdmin(true);
       sessionStorage.setItem(`admin-${quizId}`, "true");
@@ -32,6 +57,7 @@ const QuizRoom: React.FC = () => {
     socket.emit("join_room", { quizId, username });
 
     socket.on("new_question", (q: Question) => {
+      console.log("📌 New question received:", q);
       setQuestion(q);
       setAnswered(false);
     });
@@ -44,6 +70,8 @@ const QuizRoom: React.FC = () => {
       setQuizEnded(true);
       alert("Quiz Ended! Final Scores: " + JSON.stringify(scores));
     });
+
+    fetchQuizState(); // ✅ Get initial state in case event missed
 
     return () => {
       socket.disconnect();
