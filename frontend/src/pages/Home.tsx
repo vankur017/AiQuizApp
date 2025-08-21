@@ -45,7 +45,7 @@ const Home: React.FC = () => {
   return (
     <div className="home">
       <div className="homeContainer">
-        <h1>Quiz App</h1>
+        <h1 className="text-3xl font-bold ">Quiz App</h1>
 
         {/* Username input */}
         <input

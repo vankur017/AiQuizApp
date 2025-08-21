@@ -110,7 +110,7 @@ const QuizRoom: React.FC = () => {
             <button
               onClick={nextQuestion}
               disabled={!answered || quizEnded}
-              className="next-btn"
+              className="next-btn p-4"
             >
               Next Question
             </button>

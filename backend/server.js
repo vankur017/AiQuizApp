@@ -103,21 +103,58 @@ app.get("/quiz/:quizId", (req, res) => {
 io.on("connection", (socket) => {
   console.log("✅ User connected:", socket.id);
 
-  socket.on("join_room", ({ quizId, username }) => {
-    if (!rooms[quizId]) {
-      socket.emit("error", "Invalid quiz ID");
-      return;
-    }
+  // socket.on("join_room", ({ quizId, username }) => {
+  //   if (!rooms[quizId]) {
+  //     socket.emit("error", "Invalid quiz ID");
+  //     return;
+  //   }
 
-    rooms[quizId].users[socket.id] = { username, score: 0 };
-    socket.join(quizId);
+  //   rooms[quizId].users[socket.id] = { username, score: 0 };
+  //   socket.join(quizId);
 
-    io.to(quizId).emit("leaderboard_update", Object.values(rooms[quizId].users));
-    console.log(`✅ ${username} joined quiz ${quizId}`);
-  });
+  //   io.to(quizId).emit("leaderboard_update", Object.values(rooms[quizId].users));
+  //   console.log(`✅ ${username} joined quiz ${quizId}`);
+  // });
+
+socket.on("join_room", ({ quizId, username }) => {
+  if (!rooms[quizId]) {
+    socket.emit("error", "Invalid quiz ID");
+    return;
+  }
+
+  // ✅ Check if the username already exists in the room
+  const userExists = Object.values(rooms[quizId].users).some(
+    (user) => user.username === username
+  );
+
+  if (userExists) {
+    socket.emit("error", "User already joined with this name");
+    console.log(`❌ Duplicate join attempt by ${username} in quiz ${quizId}`);
+    return;
+  }
+
+  // Otherwise add the new user
+  rooms[quizId].users[socket.id] = {
+    username,
+    score: 0,
+    currentQuestionIndex: 0, // ✅ per-user state
+  };
+
+  socket.join(quizId);
+
+  io.to(quizId).emit("leaderboard_update", Object.values(rooms[quizId].users));
+  console.log(`✅ ${username} joined quiz ${quizId}`);
+
+  // ✅ Send Q1 only to this new user
+  const firstQuestion = rooms[quizId].questions[0];
+  socket.emit("new_question", firstQuestion);
+});
+
+
 
   socket.on("start_quiz", ({ quizId }) => {
     const room = rooms[quizId];
+    sessionStorage.setItem("quizId", quizId);
     if (!room) {
       socket.emit("error", "Invalid quiz ID");
       return;
@@ -128,19 +165,37 @@ io.on("connection", (socket) => {
     sendNextQuestion(io, quizId);
   });
 
+  // socket.on("submit_answer", ({ quizId, questionId, answer }) => {
+  //   const room = rooms[quizId];
+  //   if (!room) return;
+
+  //   const user = room.users[socket.id];
+  //   if (!user || room.currentQuestion?.id !== questionId) return;
+
+  //   if (answer === room.currentQuestion.correctAnswer) {
+  //     user.score += 10;
+  //   }
+
+  //   io.to(quizId).emit("leaderboard_update", Object.values(room.users));
+  // });
+
   socket.on("submit_answer", ({ quizId, questionId, answer }) => {
-    const room = rooms[quizId];
-    if (!room) return;
+  const room = rooms[quizId];
+  if (!room) return;
 
-    const user = room.users[socket.id];
-    if (!user || room.currentQuestion?.id !== questionId) return;
+  const user = room.users[socket.id];
+  if (!user) return;
 
-    if (answer === room.currentQuestion.correctAnswer) {
-      user.score += 10;
-    }
+  const currentQ = room.questions[user.currentQuestionIndex];
+  if (!currentQ || currentQ.id !== questionId) return;
 
-    io.to(quizId).emit("leaderboard_update", Object.values(room.users));
-  });
+  if (answer === currentQ.correctAnswer) {
+    user.score += 10;
+  }
+
+  io.to(quizId).emit("leaderboard_update", Object.values(room.users));
+});
+
 
   socket.on("disconnect", () => {
     for (const quizId in rooms) {
@@ -151,12 +206,31 @@ io.on("connection", (socket) => {
     }
   });
 
+  // socket.on("next_question", ({ quizId }) => {
+  //   const room = rooms[quizId];
+  //   if (!room) return;
+  //   room.currentQuestionIndex++;
+  //   sendNextQuestion(io, quizId);
+  // });
+
   socket.on("next_question", ({ quizId }) => {
-    const room = rooms[quizId];
-    if (!room) return;
-    room.currentQuestionIndex++;
-    sendNextQuestion(io, quizId);
-  });
+  const room = rooms[quizId];
+  if (!room) return;
+
+  const user = room.users[socket.id];
+  if (!user) return;
+
+  user.currentQuestionIndex++;
+  if (user.currentQuestionIndex >= room.questions.length) {
+    socket.emit("quiz_end", { score: user.score });
+    return;
+  }
+
+  const nextQ = room.questions[user.currentQuestionIndex];
+  socket.emit("new_question", nextQ); // ✅ send only to this user
+});
+
+
 });
 
 // --- Helper: Send Next Question ---

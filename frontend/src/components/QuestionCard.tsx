@@ -1,4 +1,5 @@
 import React from "react";
+import "./QuestionCard.css"; // Assuming you have some styles for the card
 
 interface Props {
   question: {
